@@ -1,142 +1,174 @@
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2/promise');
+const mongoose = require('mongoose');
+
+const User = require('./models/User');
+const Resource = require('./models/Resource');
+const Booking = require('./models/Booking');
+const UsedBy = require('./models/UsedBy'); // Optional, but included for completeness
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const pool = mysql.createPool({
-  host: '127.0.0.1',
-  user: 'root',
-  password: '1234',
-  database: 'RMS', 
-  waitForConnections: true,
-  connectionLimit: 10,
-});
+// Connect to local MongoDB
+mongoose.connect('mongodb://localhost:27017/rms', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+}).then(() => console.log('MongoDB connected')).catch(console.error);
 
-// Login endpoint checking email and pwd_hash
+// -- LOGIN --
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const [rows] = await pool.query(
-      'SELECT user_id AS id, name, email, role, pwd_hash FROM Users WHERE email=?',
-      [email]
-    );
-    if (!rows.length) return res.status(401).json({ message: 'Invalid credentials' });
-
-    const user = rows[0];
-    if (password !== user.pwd_hash) {
+    const user = await User.findOne({ email });
+    if (!user || user.pwd_hash !== password) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
-
-    delete user.pwd_hash;
-    res.json({ token: 'demo', user });
+    const userData = user.toObject();
+    delete userData.pwd_hash;
+    res.json({ token: 'demo', user: userData });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-// List available resources
+// -- LIST AVAILABLE RESOURCES --
 app.get('/api/resources', async (_req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM Resources WHERE status="Available" ORDER BY name'
-    );
-    res.json(rows);
+    const resources = await Resource.find({ status: 'Available' }).sort({ name: 1 });
+    res.json(resources);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-// Create a booking
+// -- CREATE A BOOKING --
 app.post('/api/bookings', async (req, res) => {
   const { resource_id, user_id, start_time, end_time } = req.body;
   try {
-    // Check if resource exists and get status
-    const [[resource]] = await pool.query(
-      'SELECT status FROM Resources WHERE resource_id = ?',
-      [resource_id]
-    );
+    const resource = await Resource.findById(resource_id);
     if (!resource) return res.status(404).json({ message: 'Resource not found' });
 
-    // Insert into Used_By if not exists to satisfy foreign key constraint
-    await pool.query(
-      'INSERT IGNORE INTO Used_By (user_id, resource_id) VALUES (?, ?)',
-      [user_id, resource_id]
+    // Optionally link in UsedBy collection if you’re using it
+    await UsedBy.findOneAndUpdate(
+      { user: user_id, resource: resource_id },
+      { user: user_id, resource: resource_id },
+      { upsert: true }
     );
 
-    // Status: 'Booked' if resource available, else 'Unavailable' or handle as per your logic
+    // Only allow booking if resource is available
     const status = resource.status === 'Available' ? 'Booked' : 'Unavailable';
 
-    // Insert booking
-    const [result] = await pool.query(
-      'INSERT INTO Bookings (resource_id, user_id, start_time, end_time, status) VALUES (?, ?, ?, ?, ?)',
-      [resource_id, user_id, start_time, end_time, status]
-    );
-    res.json({ id: result.insertId, status });
+    const booking = new Booking({
+      resource: resource_id,
+      user: user_id,
+      start_time: new Date(start_time),
+      end_time: new Date(end_time),
+      status,
+    });
+
+    const savedBooking = await booking.save();
+    res.json({ id: savedBooking._id, status });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-
-// Add a new resource
+// -- ADD A NEW RESOURCE --
 app.post('/api/resources', async (req, res) => {
-  const { name, location, capacity, equipment = '', status = 'Available' } = req.body;
+  const { name, status = 'Available', capacity, availability_start, availability_end, equipment = '', location } = req.body;
   try {
-    const [result] = await pool.query(
-      'INSERT INTO Resources (name, location, capacity, equipment, status) VALUES (?, ?, ?, ?, ?)',
-      [name, location, Number(capacity), equipment, status]
-    );
-    res.json({ id: result.insertId, message: 'resource added' });
+    const resource = new Resource({
+      name,
+      status,
+      capacity,
+      availability_start,
+      availability_end,
+      equipment,
+      location
+    });
+    const saved = await resource.save();
+    res.json({ id: saved._id, message: 'resource added' });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
+// -- GET RESOURCES WITH BOOKINGS (FOR SEARCH) --
 app.get('/api/resources-with-bookings', async (_req, res) => {
   try {
-    const sql = `
-      SELECT 
-        r.resource_id, r.name, r.location, r.capacity, r.status AS base_status,
-        ub.user_id AS used_by_user_id, u.name AS used_by_name, u.email AS used_by_email,
-        b.booking_id, b.start_time, b.end_time
-      FROM Resources r
-      LEFT JOIN Used_By ub ON r.resource_id = ub.resource_id
-      LEFT JOIN Users u ON ub.user_id = u.user_id
-      LEFT JOIN Bookings b ON r.resource_id = b.resource_id AND ub.user_id = b.user_id 
-          AND b.status = 'Booked'
-      ORDER BY r.name, u.name
-    `;
-    const [rows] = await pool.query(sql);
-    res.json(rows);
+    // Get all resources
+    const resources = await Resource.find().sort({ name: 1 }).lean();
+
+    // Collect all resource-booking pairs
+    const result = await Promise.all(resources.map(async r => {
+      const bookings = await Booking.find({ resource: r._id, status: 'Booked' })
+        .populate('user', 'name email')
+        .lean();
+
+      // If no booking, provide blank/empty booking object for display
+      if (bookings.length === 0) {
+        return [{
+          resource_id: r._id,
+          name: r.name,
+          location: r.location,
+          capacity: r.capacity,
+          base_status: r.status,
+          used_by_user_id: null,
+          used_by_name: null,
+          used_by_email: null,
+          booking_id: null,
+          start_time: null,
+          end_time: null,
+        }];
+      }
+
+      // Otherwise map all bookings with populated user info
+      return bookings.map(b => ({
+        resource_id: r._id,
+        name: r.name,
+        location: r.location,
+        capacity: r.capacity,
+        base_status: r.status,
+        used_by_user_id: b.user ? b.user._id : null,
+        used_by_name: b.user ? b.user.name : null,
+        used_by_email: b.user ? b.user.email : null,
+        booking_id: b._id,
+        start_time: b.start_time,
+        end_time: b.end_time,
+      }));
+    }));
+
+    res.json(result.flat());
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-
-
+// -- LIST MY BOOKINGS --
 app.get('/api/mybookings/:user_id', async (req, res) => {
   const userId = req.params.user_id;
   try {
-    const sql = `
-      SELECT 
-        b.booking_id, b.start_time, b.end_time, b.status AS booking_status,
-        r.resource_id, r.name AS resource_name, r.location
-      FROM Bookings b
-      JOIN Resources r ON b.resource_id = r.resource_id
-      WHERE b.user_id = ?
-      ORDER BY b.start_time DESC
-    `;
-    const [rows] = await pool.query(sql, [userId]);
-    res.json(rows);
+    const bookings = await Booking.find({ user: userId })
+      .populate('resource', 'name location')
+      .sort({ start_time: -1 })
+      .lean();
+
+    const resp = bookings.map(b => ({
+      booking_id: b._id,
+      start_time: b.start_time,
+      end_time: b.end_time,
+      booking_status: b.status,
+      resource_id: b.resource._id,
+      resource_name: b.resource.name,
+      location: b.resource.location,
+    }));
+    res.json(resp);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-
-
-app.listen(4000, () => console.log('API running on http://localhost:4000'));
+const PORT = 4000;
+app.listen(PORT, () => console.log(`API running on http://localhost:${PORT}`));

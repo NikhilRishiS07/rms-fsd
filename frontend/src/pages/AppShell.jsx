@@ -19,6 +19,7 @@ function isResourceUnderUse(bookings) { //checks if the current time falls under
 }
 
 
+// --- updated SearchTab() (replace the existing SearchTab in AppShell.jsx) ---
 function SearchTab() {
   const { user } = useAuth();
   const [resources, setResources] = useState([]);
@@ -44,15 +45,22 @@ function SearchTab() {
   useEffect(() => { loadResources(); }, []);
 
   const book = async (resourceId) => {
+    if (!user) {
+      setMsg('You must be signed in to book');
+      return;
+    }
     if (!from || !to) {
       setMsg('Pick start and end time first');
       return;
     }
     setMsg('');
     try {
+      const userId = user.id || user._id;
+      if (!userId) throw new Error('User id is missing');
+
       const payload = {
         resource_id: resourceId,
-        user_id: user.id,
+        user_id: userId,
         start_time: from.replace('T', ' ') + ':00',
         end_time: to.replace('T', ' ') + ':00',
       };
@@ -64,6 +72,7 @@ function SearchTab() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.message || 'Booking failed');
       setMsg(data.status === 'Booked' ? 'Booked Successfully' : 'Booking Pending');
+      await loadResources();
     } catch (e) {
       setMsg(e.message || 'Booking failed');
     }
@@ -111,7 +120,7 @@ function SearchTab() {
                 : 'Free';
 
             return resource.bookings.map((booking, i) => (
-              <tr key={`${resource.resource_id}-${booking.used_by_user_id || i}`}>
+              <tr key={`${resource.resource_id}-${booking.booking_id || i}`}>
                 {i === 0 && (
                   <>
                     <td rowSpan={resource.bookings.length} style={{ border: '1px solid black', padding: 8 }}>{resource.name}</td>
@@ -128,14 +137,18 @@ function SearchTab() {
                 <td style={{ border: '1px solid black', padding: 8 }}>
                   {booking.end_time ? new Date(booking.end_time).toLocaleString() : '—'}
                 </td>
-                <td style={{ border: '1px solid black', padding: 8 }}>
-                  <button 
-                    onClick={() => book(resource.resource_id)} 
-                    disabled={loading || !from || !to || resource.base_status !== 'Available'}
-                  >
-                    Book
-                  </button>
-                </td>
+
+                {/* Render the Actions cell only once per resource (first row) */}
+                {i === 0 ? (
+                  <td rowSpan={resource.bookings.length} style={{ border: '1px solid black', padding: 8 }}>
+                    <button
+                      onClick={() => book(resource.resource_id)}
+                      disabled={loading || !from || !to || resource.base_status !== 'Available'}
+                    >
+                      Book
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             ));
           })}

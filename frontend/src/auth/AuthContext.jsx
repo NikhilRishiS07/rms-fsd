@@ -2,10 +2,17 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 
 const AuthContext = createContext(null);
 
+function normalizeUser(u) {
+  if (!u) return null;
+  // ensure an `id` property exists (use Mongo `_id` if present)
+  return { ...u, id: u.id || (u._id ? String(u._id) : undefined) };
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     const raw = localStorage.getItem('rms_user');
-    return raw ? JSON.parse(raw) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed ? normalizeUser(parsed) : null;
   });
   const [token, setToken] = useState(() => localStorage.getItem('rms_token'));
 
@@ -21,7 +28,7 @@ export function AuthProvider({ children }) {
 
   const login = (nextToken, nextUser) => {
     setToken(nextToken);
-    setUser(nextUser);
+    setUser(normalizeUser(nextUser));
   };
 
   const logout = () => {
