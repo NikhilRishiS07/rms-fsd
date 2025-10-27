@@ -1,20 +1,20 @@
 Basic Overview:  
 Frontend: React JS  
 Backend: Node JS  
-Database: MySQL  
+Database: MongoDB
 
 --------------------------------------------------------------------------------------------------------------------------
 
 Steps to run:
-1. install Node js, MySQL Workbench, MySQL Installer, create a new connection in MySQL Workbench with any connection name.
+1. install Node js, MongoDB Community Server (select MongoDB Compass as well while installing), create a new connection in MongoDB Compass with connection name as "fsd".
 2. git clone into your local file storage
 3. run the following commands in cmd terminal:
  1. cd backend && npm i
  2. cd ../frontend && npm i
-4. navigate to db_setup and run the two sql queries (data.sql and setup.sql in MySQL Workbench) to initialize your database.
+ 3. cd ..//backend npm install mongoose
+4. under the backend folder ("cd backend" in terminal), type "node seed.js" to initialize your database.
 5. use "cd backend" in cmd and use "npm start" to start the backend server.
 6. use "cd frontend" in cmd and use "npm run dev" to run frontend (Vite + React).
 4. after inserting values see if values are successfully inserted into the table.
-5. NEW (22-Oct-2025) also install NODEMON into backend, it allows dynamic updation of server without restarting it.
-6. under package json in backend modify "start":"nodemon server.js"
+5. the default pass for all available emails is '123'.
 
