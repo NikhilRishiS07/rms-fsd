@@ -11,7 +11,7 @@ Steps to run:
 3. run the following commands in cmd terminal:
  1. cd backend && npm i
  2. cd ../frontend && npm i
- 3. cd ..//backend npm install mongoose
+ 3. cd ../backend npm install mongoose
 4. under the backend folder ("cd backend" in terminal), type "node seed.js" to initialize your database. (BEFORE RUNNING seed.js MAKE SURE THAT "fsd" CONNECTION IS RUNNING UNDER MongoDB COMPASS).
 5. use "cd backend" in cmd and use "npm start" to start the backend server.
 6. use "cd frontend" in cmd and use "npm run dev" to run frontend (Vite + React).
